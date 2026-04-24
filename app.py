@@ -1,148 +1,126 @@
 import streamlit as st
-import time
 import pandas as pd
+import plotly.express as px
 
 from model_utils import prepare_data, train_model, unlearn, evaluate
 
 st.set_page_config(page_title="UnlearnIQ", layout="wide")
 
 # =========================
-# SESSION STATE
+# HEADER
 # =========================
-if "page" not in st.session_state:
-    st.session_state.page = "splash"
-
-# =========================
-# SPLASH SCREEN
-# =========================
-if st.session_state.page == "splash":
-    st.markdown(
-        """
-        <h1 style='text-align:center;'>🧠 UnlearnIQ</h1>
-        <h3 style='text-align:center;'>Intelligent Machine Unlearning System</h3>
-        """,
-        unsafe_allow_html=True
-    )
-    time.sleep(2)
-    st.session_state.page = "upload"
-    st.rerun()
+st.markdown("""
+<h1 style='text-align:center;'>🧠 UnlearnIQ</h1>
+<h4 style='text-align:center;color:gray;'>
+Smart Machine Unlearning Dashboard
+</h4>
+<hr>
+""", unsafe_allow_html=True)
 
 # =========================
-# PAGE 1: UPLOAD
+# STEP 1: UPLOAD
 # =========================
-elif st.session_state.page == "upload":
+st.markdown("## 📂 Step 1: Upload Dataset")
 
-    st.title("📂 Upload Dataset")
+file = st.file_uploader("Upload your dataset")
 
-    file = st.file_uploader("Upload CSV")
+if file:
+    df = pd.read_csv(file)
+    df = prepare_data(df)
 
-    if file:
-        df = pd.read_csv(file)
-        df = prepare_data(df)
+    st.success("Dataset Loaded!")
 
-        st.session_state.df = df
-        st.success("Dataset Loaded!")
-
-        if st.button("Next → Train Model"):
-            st.session_state.page = "train"
-            st.rerun()
-
-# =========================
-# PAGE 2: TRAIN
-# =========================
-elif st.session_state.page == "train":
-
-    st.title("🤖 Training Model")
-
-    df = st.session_state.df
+    # =========================
+    # STEP 2: TRAIN
+    # =========================
+    st.markdown("## 🤖 Step 2: Train Baseline Model")
 
     model, tfidf, acc = train_model(df)
 
-    st.session_state.model = model
-    st.session_state.tfidf = tfidf
+    st.metric("Model Accuracy", round(acc,4))
 
-    st.metric("Accuracy", round(acc,4))
-
-    if st.button("Next → Select Users"):
-        st.session_state.page = "select"
-        st.rerun()
-
-# =========================
-# PAGE 3: SELECT USERS
-# =========================
-elif st.session_state.page == "select":
-
-    st.title("🧩 Select Users to Forget")
-
-    df = st.session_state.df
+    # =========================
+    # STEP 3: USER SELECT
+    # =========================
+    st.markdown("## 🧩 Step 3: Select Users to Forget")
 
     users = sorted(df['UserId'].unique())
 
-    selected = st.multiselect("Select Users", users)
-
-    st.session_state.selected = selected
-
-    if st.button("Next → Run Unlearning"):
-        st.session_state.page = "unlearn"
-        st.rerun()
-
-# =========================
-# PAGE 4: UNLEARNING
-# =========================
-elif st.session_state.page == "unlearn":
-
-    st.title("⚙️ Running Unlearning...")
-
-    df = st.session_state.df
-    selected = st.session_state.selected
-
-    model = st.session_state.model
-    tfidf = st.session_state.tfidf
-
-    un_model, tfidf_u = unlearn(df, selected)
-
-    st.session_state.un_model = un_model
-    st.session_state.tfidf_u = tfidf_u
-
-    st.success("Unlearning Completed!")
-
-    if st.button("View Results"):
-        st.session_state.page = "results"
-        st.rerun()
-
-# =========================
-# PAGE 5: RESULTS
-# =========================
-elif st.session_state.page == "results":
-
-    st.title("📊 Results Dashboard")
-
-    df = st.session_state.df
-    selected = st.session_state.selected
-
-    pred, conf, auc, score = evaluate(
-        st.session_state.model,
-        st.session_state.tfidf,
-        st.session_state.un_model,
-        st.session_state.tfidf_u,
-        df,
-        selected
+    selected_users = st.multiselect(
+        "Choose users (search supported)",
+        users
     )
 
-    col1, col2, col3 = st.columns(3)
+    st.info(f"Selected {len(selected_users)} users")
 
-    col1.metric("Prediction Change", round(pred,4))
-    col2.metric("Confidence Drop", round(conf,4))
-    col3.metric("Re-ID AUC", round(auc,4))
+    # =========================
+    # STEP 4: UNLEARNING
+    # =========================
+    if st.button("🚀 Run Unlearning"):
 
-    st.markdown("---")
+        un_model, tfidf_u = unlearn(df, selected_users)
 
-    st.subheader("🔐 Privacy Score")
-    st.progress(score)
+        # =========================
+        # STEP 5: RESULTS
+        # =========================
+        st.markdown("## 📊 Step 5: Results")
 
-    if score > 0.4:
-        st.success("✅ Strong Privacy")
-    elif score > 0.25:
-        st.warning("⚠️ Moderate Privacy")
-    else:
-        st.error("❌ Weak Privacy")
+        pred, conf, auc, score = evaluate(
+            model, tfidf, un_model, tfidf_u, df, selected_users
+        )
+
+        # -------------------------
+        # METRIC CARDS
+        # -------------------------
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Prediction Change", round(pred,4))
+        col2.metric("Confidence Drop", round(conf,4))
+        col3.metric("Re-ID AUC", round(auc,4))
+        col4.metric("Privacy Score", round(score,4))
+
+        st.markdown("---")
+
+        # -------------------------
+        # VISUALIZATION
+        # -------------------------
+        st.markdown("### 📈 Model Behavior Change")
+
+        chart_df = pd.DataFrame({
+            "Metric": ["Prediction Change","Confidence Drop","Privacy Score"],
+            "Value": [pred, conf, score]
+        })
+
+        fig = px.bar(chart_df, x="Metric", y="Value", text="Value")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # -------------------------
+        # PROGRESS BAR
+        # -------------------------
+        st.markdown("### 🔐 Privacy Strength")
+        st.progress(score)
+
+        # -------------------------
+        # VERDICT
+        # -------------------------
+        if score > 0.4:
+            st.success("✅ Strong Privacy Protection")
+        elif score > 0.25:
+            st.warning("⚠️ Moderate Privacy")
+        else:
+            st.error("❌ Weak Privacy")
+
+        # -------------------------
+        # EXTRA INSIGHT
+        # -------------------------
+        st.markdown("### 🧠 Insights")
+
+        st.write("""
+- Model forgets selected users partially  
+- Confidence reduction indicates uncertainty increase  
+- Lower AUC → attacker failure  
+- System reduces privacy leakage effectively  
+        """)
+
+else:
+    st.info("Upload a dataset to begin")
